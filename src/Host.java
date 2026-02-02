@@ -8,4 +8,18 @@
 //2 threads (while true loops)
 
 public class Host {
+    public static void main(String[] args) {
+        if (args.length != 1) {
+            System.out.println("Usage: java Program <ID>");
+            return;
+        }
+
+        Config config = ConfigParser.parse("config.txt", args[0]);
+
+        System.out.println("I am " + config.device);
+        System.out.println("My neighbors:");
+        for (Device d : config.neighbors) {
+            System.out.println(" - " + d);
+        }
+    }
 }
