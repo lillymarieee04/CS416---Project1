@@ -7,19 +7,82 @@
 
 //2 threads (while true loops)
 
+
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.util.Scanner;
+
+
 public class Host {
-    public static void main(String[] args) {
-        if (args.length != 1) {
-            System.out.println("Usage: java Program <ID>");
-            return;
+    private Device me;
+    private Device connectedSwitch;
+    private DatagramSocket socket;
+
+    public Host(Config config) {
+        this.me = config.device;
+        if (config.neighbors.isEmpty()) {
+            throw new RuntimeException("Host must be connected to a switch");
         }
+        this.connectedSwitch = config.neighbors.get(0);
+    }
 
-        Config config = ConfigParser.parse("config.txt", args[0]);
+    public void start() throws Exception {
+        socket = new DatagramSocket(me.port);
+        System.out.println("Host " + me.id + " started on port " + me.port);
+        System.out.println("Connected to switch: " + connectedSwitch);
+        System.out.println();
 
-        System.out.println("I am " + config.device);
-        System.out.println("My neighbors:");
-        for (Device d : config.neighbors) {
-            System.out.println(" - " + d);
+        Thread receiverThread = new Thread(() -> {
+
+        });
+        receiverThread.setDaemon(true);
+        receiverThread.start();
+
+        sendFrames();
+    }
+
+    private void sendFrames() {
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("Enter messages in the format: <destination> <message>");
+        System.out.println("Example: D hello");
+        System.out.println();
+
+        while (true) {
+            try {
+                System.out.print(me.id + "> ");
+                String input = scanner.nextLine().trim();
+
+                if (input.isEmpty()) {
+                    continue;
+                }
+
+                String[] parts = input.split("\\s+", 2);
+                if (parts.length < 2) {
+                    System.out.println("Invalid format. Use: <destination> <message>");
+                    continue;
+                }
+
+                String destination = parts[0];
+                String message = parts[1];
+
+                String frameString = me.id + ":" + destination + ":" + message;
+
+                byte[] data = frameString.getBytes();
+                DatagramPacket packet = new DatagramPacket(
+                        data,
+                        data.length,
+                        InetAddress.getByName(connectedSwitch.ip),
+                        connectedSwitch.port
+                );
+                socket.send(packet);
+
+                System.out.println("Sent frame: " + frameString);
+
+            } catch (Exception e) {
+                System.err.println("Error sending frame: " + e.getMessage());
+                e.printStackTrace();
+            }
         }
     }
 }
