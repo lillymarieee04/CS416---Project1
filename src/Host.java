@@ -34,7 +34,26 @@ public class Host {
         System.out.println();
 
         Thread receiverThread = new Thread(() -> {
+            try {
+                byte[] buffer = new byte[1024];
+                while (true) {
+                    DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                    socket.receive(packet);
 
+                    String msg = new String(packet.getData(), 0, packet.getLength());
+                    Frame frame = new Frame(msg);
+
+                    // Requirement 11: Check MAC and print appropriate message
+                    if (frame.dst.equals(me.id)) {
+                        System.out.println("\n[RECEIVED] From " + frame.src + ": " + frame.payload);
+                    } else {
+                        System.out.println("\n[DEBUG] MAC address mismatch: frame for " + frame.dst + " received by " + me.id);
+                    }
+                    System.out.print(me.id + "> "); // Reprint prompt
+                }
+            } catch (Exception e) {
+                System.err.println("Receiver error: " + e.getMessage());
+            }
         });
         receiverThread.setDaemon(true);
         receiverThread.start();
@@ -84,5 +103,13 @@ public class Host {
                 e.printStackTrace();
             }
         }
+    }
+    public static void main(String[] args) throws Exception {
+        if (args.length < 1) {
+            System.out.println("Usage: java Host <device-id>");
+            return;
+        }
+        Config config = ConfigParser.parse("config.txt", args[0]);
+        new Host(config).start();
     }
 }
