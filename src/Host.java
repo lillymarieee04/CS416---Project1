@@ -14,6 +14,9 @@ import java.net.InetAddress;
 import java.util.Scanner;
 
 
+//subnets 
+
+
 public class Host {
     private Device me;
     private Device connectedSwitch;
@@ -49,7 +52,7 @@ public class Host {
                     } else {
                         System.out.println("\n[DEBUG] MAC address mismatch: frame for " + frame.dst + " received by " + me.id);
                     }
-                    System.out.print(me.id + "> "); // Reprint prompt
+                    System.out.print(me.id + "> ");
                 }
             } catch (Exception e) {
                 System.err.println("Receiver error: " + e.getMessage());
