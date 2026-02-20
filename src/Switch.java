@@ -26,8 +26,9 @@ public class Switch {
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
             socket.receive(packet);
 
-            es.submit(() -> handlePacket(packet, socket));
-        }
+            byte[] copy = Arrays.copyOf(packet.getData(), packet.getLength());
+            DatagramPacket safe = new DatagramPacket(copy, copy.length, packet.getAddress(), packet.getPort());
+            es.submit(() -> handlePacket(safe, socket));        }
     }
 
     private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
@@ -89,7 +90,7 @@ public class Switch {
         }
     }
 
-    public static void main(String[] args) throws Exception {
+    static void main(String[] args) throws Exception {
         if (args.length < 1) return;
         Config config = ConfigParser.parse("config.txt", args[0]);
         new Switch(config).start();
