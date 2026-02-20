@@ -25,11 +25,15 @@ public class ConfigParser {
                 }
 
                 if (readingDevices) {
-                    if (parts.length != 3) continue;
-                    String id = parts[0];
-                    String ip = parts[1];
-                    int port = Integer.parseInt(parts[2]);
-                    devices.put(id, new Device(id, ip, port));
+                    if (parts.length >= 3) {
+                        String id = parts[0];
+                        String ip = parts[1];
+                        int port = Integer.parseInt(parts[2]);
+                        Device d = new Device(id, ip, port);
+                        if (parts.length >= 4) d.virtualIP = parts[3];
+                        if (parts.length >= 5) d.gateway = parts[4];
+                        devices.put(id, d);
+                    }
                 }
                 else if (readingLinks) {
                     if (parts.length != 2) continue;
@@ -56,4 +60,3 @@ public class ConfigParser {
         return new Config(me, neighbors);
     }
 }
-

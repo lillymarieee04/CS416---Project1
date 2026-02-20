@@ -7,7 +7,7 @@ public class Frame {
     public String payload;
 
     public Frame(String raw) {
-        String[] parts = raw.split(":", 3);
+        String[] parts = raw.split(":", 5);
         this.src = parts[0];
         this.dst = parts[1];
         this.dstIP = parts[2];
