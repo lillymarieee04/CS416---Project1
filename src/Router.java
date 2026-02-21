@@ -60,20 +60,21 @@ public class Router {
             String msg = new String(packet.getData(), 0, packet.getLength());
             Frame frame = new Frame(msg);
 
-            System.out.println("[" + me.id + "] RECEIVED  src=" + frame.src +
+            System.out.println("[" + me.id + "] RECEIVED src=" + frame.src +
                     " dst=" + frame.dst +
                     " srcIP=" + frame.srcIP +
                     " dstIP=" + frame.dstIP +
                     " msg=" + frame.payload);
 
-            // Only process frames whose MAC destination is this router
+            // If MAC destination is not this router → ignore
             if (!frame.dst.equals(me.id)) {
+                System.out.println("[" + me.id + "] Frame not for me. Ignored.");
                 return;
             }
 
             String dstSubnet = frame.dstIP.substring(0, frame.dstIP.indexOf('.'));
 
-            // If IP is for this router
+            // If IP destination is this router
             if (frame.dstIP.endsWith("." + me.id)) {
                 System.out.println("[" + me.id + "] IP packet destined to me. Received and ignored.");
                 return;
