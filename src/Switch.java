@@ -90,7 +90,7 @@ public class Switch {
         }
     }
 
-    static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws Exception {
         if (args.length < 1) return;
         Config config = ConfigParser.parse("config.txt", args[0]);
         new Switch(config).start();

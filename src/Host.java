@@ -86,11 +86,13 @@ public class Host {
                     continue;
                 }
 
-                String destVirtualIP = parts[0]; // e.g. "net3.D"
+                String destVirtualIP = parts[0]; // e.g. "net3.D" or "net1.B"
                 String message       = parts[1];
 
+                // CRITICAL FIX: Determine destination MAC based on same/different subnet
+                String dstMAC = determineDestinationMAC(destVirtualIP);
 
-                String frameString = me.id + ":" + gatewayMAC + ":" + myVirtualIP + ":" + destVirtualIP + ":" + message;
+                String frameString = me.id + ":" + dstMAC + ":" + myVirtualIP + ":" + destVirtualIP + ":" + message;
 
                 byte[] data = frameString.getBytes();
                 DatagramPacket packet = new DatagramPacket(
@@ -106,6 +108,25 @@ public class Host {
                 e.printStackTrace();
             }
         }
+    }
+
+    private String determineDestinationMAC(String destVirtualIP) {
+        // Extract subnet prefix from both IPs
+        String mySubnet = extractSubnet(myVirtualIP);      // "net1" from "net1.A"
+        String destSubnet = extractSubnet(destVirtualIP);  // "net3" from "net3.D"
+
+        if (mySubnet.equals(destSubnet)) {
+            // Same subnet - send directly to destination host
+            return extractId(destVirtualIP);  // "B" from "net1.B"
+        } else {
+            // Different subnet - send to gateway router
+            return gatewayMAC;  // "R1"
+        }
+    }
+    
+    private String extractSubnet(String virtualIP) {
+        int dot = virtualIP.indexOf('.');
+        return (dot >= 0) ? virtualIP.substring(0, dot) : virtualIP;
     }
 
     public static void main(String[] args) throws Exception {
