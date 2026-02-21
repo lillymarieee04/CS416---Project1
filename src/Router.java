@@ -11,9 +11,7 @@ public class Router {
     private List<Device> neighbors;
     private ExecutorService es = Executors.newFixedThreadPool(4);
 
-    // Forwarding table
-    // can replace buildForwardingTable() later
-    private Map<String, String> forwardingTable = new HashMap<>(); // subnet -> neighborId or nextHopVirtualIP
+    private Map<String, String> forwardingTable = new HashMap<>();
 
     public Router(Config config) {
         this.me = config.device;
@@ -21,16 +19,15 @@ public class Router {
         buildForwardingTable();
     }
 
-    // Hard-coded tables
     private void buildForwardingTable() {
         if (me.id.equals("R1")) {
-            forwardingTable.put("net1", "S1");       // directly connected, exit via S1
-            forwardingTable.put("net2", "R2");       // directly connected, exit via R2
-            forwardingTable.put("net3", "net2.R2");  // remote, next-hop is R2
+            forwardingTable.put("net1", "S1");
+            forwardingTable.put("net2", "R2");
+            forwardingTable.put("net3", "net2.R2");
         } else if (me.id.equals("R2")) {
-            forwardingTable.put("net2", "R1");       // directly connected, exit via R1
-            forwardingTable.put("net3", "S2");       // directly connected, exit via S2
-            forwardingTable.put("net1", "net2.R1");  // remote, next-hop is R1
+            forwardingTable.put("net2", "R1");
+            forwardingTable.put("net3", "S2");
+            forwardingTable.put("net1", "net2.R1");
         }
 
         System.out.println("Router " + me.id + " forwarding table:");
@@ -45,11 +42,15 @@ public class Router {
         System.out.println("Router " + me.id + " listening on port " + me.port);
 
         byte[] buffer = new byte[4096];
+
         while (true) {
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
             socket.receive(packet);
+
             byte[] copy = Arrays.copyOf(packet.getData(), packet.getLength());
-            DatagramPacket safe = new DatagramPacket(copy, copy.length, packet.getAddress(), packet.getPort());
+            DatagramPacket safe =
+                    new DatagramPacket(copy, copy.length, packet.getAddress(), packet.getPort());
+
             es.submit(() -> handlePacket(safe, socket));
         }
     }
@@ -59,20 +60,36 @@ public class Router {
             String msg = new String(packet.getData(), 0, packet.getLength());
             Frame frame = new Frame(msg);
 
-            System.out.println("[" + me.id + "] RECEIVED  src=" + frame.src + " dst=" + frame.dst
-                    + " srcIP=" + frame.srcIP + " dstIP=" + frame.dstIP + " msg=" + frame.payload);
+            System.out.println("[" + me.id + "] RECEIVED  src=" + frame.src +
+                    " dst=" + frame.dst +
+                    " srcIP=" + frame.srcIP +
+                    " dstIP=" + frame.dstIP +
+                    " msg=" + frame.payload);
 
+            // Only process frames whose MAC destination is this router
             if (!frame.dst.equals(me.id)) {
                 return;
             }
 
-// If IP destination is this router, receive and ignore
+            String dstSubnet = frame.dstIP.substring(0, frame.dstIP.indexOf('.'));
+
+            // If IP is for this router
             if (frame.dstIP.endsWith("." + me.id)) {
                 System.out.println("[" + me.id + "] IP packet destined to me. Received and ignored.");
                 return;
             }
 
-            String dstSubnet = frame.dstIP.substring(0, frame.dstIP.indexOf('.'));
+            // Same-subnet traffic (switch flooding case)
+            if (me.id.equals("R1") && dstSubnet.equals("net1")) {
+                System.out.println("[" + me.id + "] Same-subnet traffic. Received and ignored.");
+                return;
+            }
+
+            if (me.id.equals("R2") && dstSubnet.equals("net3")) {
+                System.out.println("[" + me.id + "] Same-subnet traffic. Received and ignored.");
+                return;
+            }
+
             String tableEntry = forwardingTable.get(dstSubnet);
 
             if (tableEntry == null) {
@@ -84,10 +101,10 @@ public class Router {
             Device outNeighbor;
 
             if (tableEntry.contains(".")) {
-                newDstMAC   = extractId(tableEntry);
+                newDstMAC = extractId(tableEntry);
                 outNeighbor = findNeighbor(newDstMAC);
             } else {
-                newDstMAC   = extractId(frame.dstIP);
+                newDstMAC = extractId(frame.dstIP);
                 outNeighbor = findNeighbor(tableEntry);
             }
 
@@ -97,15 +114,25 @@ public class Router {
             }
 
             Frame outFrame = new Frame(
-                    me.id + ":" + newDstMAC + ":" + frame.srcIP + ":" + frame.dstIP + ":" + frame.payload
+                    me.id + ":" +
+                            newDstMAC + ":" +
+                            frame.srcIP + ":" +
+                            frame.dstIP + ":" +
+                            frame.payload
             );
 
-            System.out.println("[" + me.id + "] FORWARDING src=" + outFrame.src + " dst=" + outFrame.dst
-                    + " srcIP=" + outFrame.srcIP + " dstIP=" + outFrame.dstIP + " msg=" + outFrame.payload);
+            System.out.println("[" + me.id + "] FORWARDING src=" + outFrame.src +
+                    " dst=" + outFrame.dst +
+                    " srcIP=" + outFrame.srcIP +
+                    " dstIP=" + outFrame.dstIP +
+                    " msg=" + outFrame.payload);
 
             byte[] data = outFrame.toString().getBytes();
-            DatagramPacket outPacket = new DatagramPacket(data, data.length,
-                    InetAddress.getByName(outNeighbor.ip), outNeighbor.port);
+            DatagramPacket outPacket =
+                    new DatagramPacket(data, data.length,
+                            InetAddress.getByName(outNeighbor.ip),
+                            outNeighbor.port);
+
             socket.send(outPacket);
 
         } catch (Exception e) {
@@ -113,7 +140,6 @@ public class Router {
         }
     }
 
-    // Extract device ID from a virtual IP: "net2.R2" -> "R2"
     private static String extractId(String virtualIP) {
         int dot = virtualIP.lastIndexOf('.');
         return (dot >= 0) ? virtualIP.substring(dot + 1) : virtualIP;
