@@ -63,7 +63,12 @@ public class Router {
                     + " srcIP=" + frame.srcIP + " dstIP=" + frame.dstIP + " msg=" + frame.payload);
 
             if (!frame.dst.equals(me.id)) {
-                System.out.println("[" + me.id + "] Frame not for me (dst=" + frame.dst + "), ignoring.");
+                return;
+            }
+
+// If IP destination is this router, receive and ignore
+            if (frame.dstIP.endsWith("." + me.id)) {
+                System.out.println("[" + me.id + "] IP packet destined to me. Received and ignored.");
                 return;
             }
 
