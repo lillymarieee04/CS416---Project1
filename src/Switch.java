@@ -6,6 +6,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class Switch {
+
     private Device me;
     private List<Device> neighbors;
     private Map<String, Device> switchTable = new HashMap<>();
@@ -19,16 +20,21 @@ public class Switch {
     public void start() throws Exception {
         DatagramSocket socket = new DatagramSocket(me.port);
         System.out.println("Switch " + me.id + " listening on port " + me.port);
+        System.out.println("Neighbors: " + neighbors);
+        System.out.println();
 
-        byte[] buffer = new byte[1024];
+        byte[] buffer = new byte[4096];
 
         while (true) {
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
             socket.receive(packet);
 
             byte[] copy = Arrays.copyOf(packet.getData(), packet.getLength());
-            DatagramPacket safe = new DatagramPacket(copy, copy.length, packet.getAddress(), packet.getPort());
-            es.submit(() -> handlePacket(safe, socket));        }
+            DatagramPacket safe = new DatagramPacket(copy, copy.length,
+                    packet.getAddress(), packet.getPort());
+
+            es.submit(() -> handlePacket(safe, socket));
+        }
     }
 
     private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
@@ -36,61 +42,62 @@ public class Switch {
             String msg = new String(packet.getData(), 0, packet.getLength());
             Frame frame = new Frame(msg);
 
-            Device incomingPort = null;
-            String srcIp = packet.getAddress().getHostAddress();
-            int srcPort = packet.getPort();
-
-            for (Device neighbor : neighbors) {
-                if (neighbor.ip.equals(srcIp) && neighbor.port == srcPort) {
-                    incomingPort = neighbor;
-                    break;
-                }
-            }
+            Device incomingPort = findNeighbor(frame.src);
 
             if (incomingPort == null) {
-                System.out.println("Port not recognized. Dropping packet.");
+                System.out.println("[" + me.id + "] Unknown source MAC: "
+                        + frame.src + ". Dropping.\n");
                 return;
             }
 
+            // Learn source MAC
             if (!switchTable.containsKey(frame.src)) {
                 switchTable.put(frame.src, incomingPort);
-                System.out.println(frame.src + " is on port " + incomingPort.id);
+                System.out.println("[" + me.id + "] Learned: "
+                        + frame.src + " is on port "
+                        + incomingPort.id);
             }
-
-            System.out.println("Switch Table:");
-            for (Map.Entry<String, Device> entry : switchTable.entrySet()) {
-                System.out.println("MAC " + entry.getKey() + " to Port " + entry.getValue().id);
-            }
-            System.out.println();
 
             Device outgoingPort = switchTable.get(frame.dst);
 
             if (outgoingPort != null) {
-                byte[] data = frame.toString().getBytes();
-                DatagramPacket outPacket = new DatagramPacket(data, data.length, InetAddress.getByName(outgoingPort.ip), outgoingPort.port);
-                socket.send(outPacket);
-                System.out.println("Sent frame to " + outgoingPort.id);
+
+                // Direct forwarding
+                sendFrame(socket, frame, outgoingPort);
+
             } else {
-                System.out.println("Flooding frame to " + frame.dst);
+
+                // Flood ONLY to devices physically connected
                 for (Device neighbor : neighbors) {
-                    if (!neighbor.equals(incomingPort)) {
-                        byte[] data = frame.toString().getBytes();
-                        DatagramPacket outPacket = new DatagramPacket(
-                                data,
-                                data.length,
-                                InetAddress.getByName(neighbor.ip),
-                                neighbor.port
-                        );
-                        socket.send(outPacket);
+                    if (!neighbor.id.equals(incomingPort.id)) {
+                        sendFrame(socket, frame, neighbor);
                     }
                 }
             }
+
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    static void main(String[] args) throws Exception {
+    private void sendFrame(DatagramSocket socket, Frame frame, Device target) throws Exception {
+        byte[] data = frame.toString().getBytes();
+        DatagramPacket outPacket = new DatagramPacket(
+                data, data.length,
+                InetAddress.getByName(target.ip),
+                target.port
+        );
+        socket.send(outPacket);
+    }
+
+    private Device findNeighbor(String id) {
+        for (Device d : neighbors) {
+            if (d.id.equals(id)) return d;
+        }
+        return null;
+    }
+
+    public static void main(String[] args) throws Exception {
         if (args.length < 1) return;
         Config config = ConfigParser.parse("config.txt", args[0]);
         new Switch(config).start();
