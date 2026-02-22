@@ -2,17 +2,17 @@
 # format:
 # ID  realIP  port  [virtualIPs...]  [gateway]
 
-A   127.0.0.1 5001   net1.A     net1.R1
-B   127.0.0.1 5002   net1.B     net1.R1
+A   192.168.4.54 5001   net1.A     net1.R1
+B   192.168.4.24 5002   net1.B     net1.R1
 
-C   127.0.0.1 5003   net3.C     net3.R2
-D   127.0.0.1 5004   net3.D     net3.R2
+C   192.168.4.54 5003   net3.C     net3.R2
+D   192.168.4.24 5004   net3.D     net3.R2
 
-S1  127.0.0.1 6001
-S2  127.0.0.1 6002
+S1  192.168.4.54 6001
+S2  192.168.4.24 6002
 
-R1  127.0.0.1 7001   net1.R1   net2.R1
-R2  127.0.0.1 7002   net2.R2   net3.R2
+R1  192.168.4.54 7001   net1.R1   net2.R1
+R2  192.168.4.24 7002   net2.R2   net3.R2
 
 
 # Links
