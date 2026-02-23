@@ -20,7 +20,6 @@ public class Router {
 
     private void buildForwardingTable() {
 
-        // ONLY device IDs — never virtual IP strings
         if (me.id.equals("R1")) {
             forwardingTable.put("net1", "S1");
             forwardingTable.put("net2", "R2");
@@ -75,7 +74,6 @@ public class Router {
                 return;
             }
 
-            // Extract subnet
             String dstSubnet = frame.dstIP.substring(0, frame.dstIP.indexOf('.'));
 
             String nextHopId = forwardingTable.get(dstSubnet);
@@ -96,11 +94,9 @@ public class Router {
 
             String newDstMAC;
 
-            // If next hop is another router
             if (nextHopId.startsWith("R")) {
                 newDstMAC = nextHopId;
             }
-            // If next hop is switch → send to final host
             else {
                 newDstMAC = extractId(frame.dstIP);
             }

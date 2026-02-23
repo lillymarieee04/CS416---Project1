@@ -50,7 +50,6 @@ public class Switch {
                 return;
             }
 
-            // Learn source MAC
             if (!switchTable.containsKey(frame.src)) {
                 switchTable.put(frame.src, incomingPort);
                 System.out.println("[" + me.id + "] Learned: "
@@ -62,12 +61,10 @@ public class Switch {
 
             if (outgoingPort != null) {
 
-                // Direct forwarding
                 sendFrame(socket, frame, outgoingPort);
 
             } else {
 
-                // Flood ONLY to devices physically connected
                 for (Device neighbor : neighbors) {
                     if (!neighbor.id.equals(incomingPort.id)) {
                         sendFrame(socket, frame, neighbor);
