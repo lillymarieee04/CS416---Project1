@@ -10,7 +10,6 @@ public class Router {
     private Device me;
     private List<Device> neighbors;
     private ExecutorService es = Executors.newFixedThreadPool(4);
-
     private Map<String, String> forwardingTable = new HashMap<>();
 
     public Router(Config config) {
@@ -20,14 +19,16 @@ public class Router {
     }
 
     private void buildForwardingTable() {
+
         if (me.id.equals("R1")) {
             forwardingTable.put("net1", "S1");
             forwardingTable.put("net2", "R2");
-            forwardingTable.put("net3", "net2.R2");
-        } else if (me.id.equals("R2")) {
-            forwardingTable.put("net2", "R1");
+            forwardingTable.put("net3", "R2");
+        }
+        else if (me.id.equals("R2")) {
             forwardingTable.put("net3", "S2");
-            forwardingTable.put("net1", "net2.R1");
+            forwardingTable.put("net2", "R1");
+            forwardingTable.put("net1", "R1");
         }
 
         System.out.println("Router " + me.id + " forwarding table:");
@@ -40,6 +41,7 @@ public class Router {
     public void start() throws Exception {
         DatagramSocket socket = new DatagramSocket(me.port);
         System.out.println("Router " + me.id + " listening on port " + me.port);
+        System.out.println();
 
         byte[] buffer = new byte[4096];
 
@@ -48,8 +50,8 @@ public class Router {
             socket.receive(packet);
 
             byte[] copy = Arrays.copyOf(packet.getData(), packet.getLength());
-            DatagramPacket safe =
-                    new DatagramPacket(copy, copy.length, packet.getAddress(), packet.getPort());
+            DatagramPacket safe = new DatagramPacket(copy, copy.length,
+                    packet.getAddress(), packet.getPort());
 
             es.submit(() -> handlePacket(safe, socket));
         }
@@ -66,73 +68,53 @@ public class Router {
                     " dstIP=" + frame.dstIP +
                     " msg=" + frame.payload);
 
-            // If MAC destination is not this router → ignore
             if (!frame.dst.equals(me.id)) {
-                System.out.println("[" + me.id + "] Frame not for me. Ignored.");
+                System.out.println("[" + me.id + "] DEBUG: Wrong frame received (dst="
+                        + frame.dst + "). Ignored.");
                 return;
             }
 
             String dstSubnet = frame.dstIP.substring(0, frame.dstIP.indexOf('.'));
 
-            // If IP destination is this router
-            if (frame.dstIP.endsWith("." + me.id)) {
-                System.out.println("[" + me.id + "] IP packet destined to me. Received and ignored.");
+            String nextHopId = forwardingTable.get(dstSubnet);
+
+            if (nextHopId == null) {
+                System.out.println("[" + me.id + "] No route to subnet "
+                        + dstSubnet + ". Dropping.\n");
                 return;
             }
 
-            // Same-subnet traffic (switch flooding case)
-            if (me.id.equals("R1") && dstSubnet.equals("net1")) {
-                System.out.println("[" + me.id + "] Same-subnet traffic. Received and ignored.");
-                return;
-            }
+            Device outNeighbor = findNeighbor(nextHopId);
 
-            if (me.id.equals("R2") && dstSubnet.equals("net3")) {
-                System.out.println("[" + me.id + "] Same-subnet traffic. Received and ignored.");
-                return;
-            }
-
-            String tableEntry = forwardingTable.get(dstSubnet);
-
-            if (tableEntry == null) {
-                System.out.println("[" + me.id + "] No route to subnet " + dstSubnet + ". Dropping.");
+            if (outNeighbor == null) {
+                System.out.println("[" + me.id + "] Cannot find neighbor "
+                        + nextHopId + ". Dropping.\n");
                 return;
             }
 
             String newDstMAC;
-            Device outNeighbor;
 
-            if (tableEntry.contains(".")) {
-                newDstMAC = extractId(tableEntry);
-                outNeighbor = findNeighbor(newDstMAC);
-            } else {
-                newDstMAC = extractId(frame.dstIP);
-                outNeighbor = findNeighbor(tableEntry);
+            if (nextHopId.startsWith("R")) {
+                newDstMAC = nextHopId;
             }
-
-            if (outNeighbor == null) {
-                System.out.println("[" + me.id + "] Cannot find neighbor for next hop. Dropping.");
-                return;
+            else {
+                newDstMAC = extractId(frame.dstIP);
             }
 
             Frame outFrame = new Frame(
-                    me.id + ":" +
-                            newDstMAC + ":" +
-                            frame.srcIP + ":" +
-                            frame.dstIP + ":" +
-                            frame.payload
+                    me.id + ":" + newDstMAC + ":" +
+                            frame.srcIP + ":" + frame.dstIP + ":" + frame.payload
             );
 
-            System.out.println("[" + me.id + "] FORWARDING src=" + outFrame.src +
-                    " dst=" + outFrame.dst +
-                    " srcIP=" + outFrame.srcIP +
-                    " dstIP=" + outFrame.dstIP +
-                    " msg=" + outFrame.payload);
+            System.out.println("[" + me.id + "] FORWARDING to "
+                    + nextHopId + " (dstMAC=" + newDstMAC + ")\n");
 
             byte[] data = outFrame.toString().getBytes();
-            DatagramPacket outPacket =
-                    new DatagramPacket(data, data.length,
-                            InetAddress.getByName(outNeighbor.ip),
-                            outNeighbor.port);
+            DatagramPacket outPacket = new DatagramPacket(
+                    data, data.length,
+                    InetAddress.getByName(outNeighbor.ip),
+                    outNeighbor.port
+            );
 
             socket.send(outPacket);
 
@@ -141,16 +123,16 @@ public class Router {
         }
     }
 
-    private static String extractId(String virtualIP) {
-        int dot = virtualIP.lastIndexOf('.');
-        return (dot >= 0) ? virtualIP.substring(dot + 1) : virtualIP;
-    }
-
     private Device findNeighbor(String id) {
         for (Device d : neighbors) {
             if (d.id.equals(id)) return d;
         }
         return null;
+    }
+
+    private static String extractId(String virtualIP) {
+        int dot = virtualIP.lastIndexOf('.');
+        return (dot >= 0) ? virtualIP.substring(dot + 1) : virtualIP;
     }
 
     public static void main(String[] args) throws Exception {
