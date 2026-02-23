@@ -25,7 +25,7 @@ public class Host {
         if (me.gateway == null) {
             throw new RuntimeException("Host " + me.id + " has no gateway in config");
         }
-        this.gatewayMAC = extractId(me.gateway); // "net1.R1" -> "R1"
+        this.gatewayMAC = extractId(me.gateway);
     }
 
     private static String extractId(String virtualIP) {
@@ -86,7 +86,7 @@ public class Host {
                     continue;
                 }
 
-                String destVirtualIP = parts[0]; // e.g. "net3.D"
+                String destVirtualIP = parts[0];
                 String message       = parts[1];
 
 
