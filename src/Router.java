@@ -1,6 +1,7 @@
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.SocketPermission;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,37 +37,75 @@ public class Router {
         }    
     }
 
+
     public Router(Config config) {
         this.me = config.device;
         this.neighbors = config.neighbors;
-        buildForwardingTable();
+        // buildForwardingTable();
+        initilzieSubnetMappings();
     }
 
-    private void buildForwardingTable() {
+    private void  initilzieSubnetMappings() {
+        //Host 
+        // if (me.id.equals("R1")) {
+        // }
+        linkToSubnet.put("R1-S1", "net1"); 
+        linkToSubnet.put("S1-R1", "net1");
 
-        if (me.id.equals("R1")) {
-            forwardingTable.put("net1", "S1");
-            forwardingTable.put("net2", "R2");
-            forwardingTable.put("net3", "R2");
-        }
-        else if (me.id.equals("R2")) {
-            forwardingTable.put("net3", "S2");
-            forwardingTable.put("net2", "R1");
-            forwardingTable.put("net1", "R1");
-        }
+        linkToSubnet.put("R3-S2", "net2");
+        linkToSubnet.put("S2-R3", "net2");
 
-        System.out.println("Router " + me.id + " forwarding table:");
-        for (Map.Entry<String, String> e : forwardingTable.entrySet()) {
-            System.out.println("  " + e.getKey() + " -> " + e.getValue());
-        }
-        System.out.println();
+        linkToSubnet.put("R6-S3", "net3");
+        linkToSubnet.put("S3-R6", "net3");
+
+
+        //Transit subnets between routers 
+        linkToSubnet.put("R1-R2", "net4");
+        linkToSubnet.put("R2-R1", "net4");
+
+        linkToSubnet.put("R1-R3", "net5");
+        linkToSubnet.put("R3-R1", "net5");
+
+        linkToSubnet.put("R2-R3", "net6");
+        linkToSubnet.put("R3-R2", "net6");
+
+        linkToSubnet.put("R2-R4", "net7");
+        linkToSubnet.put("R4-R2", "net7");
+
+        linkToSubnet.put("R3-R5", "net8");
+        linkToSubnet.put("R5-R3", "net8");
+
+        linkToSubnet.put("R4-R5", "net9");
+        linkToSubnet.put("R5-R4", "net9");
+
+        linkToSubnet.put("R4-R6", "net10");
+        linkToSubnet.put("R6-R4", "net10");
+
+        // else if (me.id.equals("R2")) {
+        
+       // }
+
+        // System.out.println("Router " + me.id + " forwarding table:");
+        // for (Map.Entry<String, String> e : forwardingTable.entrySet()) {
+        //     System.out.println("  " + e.getKey() + " -> " + e.getValue());
+        // }
+        // System.out.println();
     }
 
     public void start() throws Exception {
         DatagramSocket socket = new DatagramSocket(me.port);
-        System.out.println("Router " + me.id + " listening on port " + me.port);
+        System.out.println("Router " + me.id + " started (Distance Vector Routing) ");
+        System.out.println("Ports: " + me.port);
         System.out.println();
 
+
+        initializeRoutingTable();
+
+        broadcastDistanceVector();
+
+        startPeriodicUpdates();
+
+        
         byte[] buffer = new byte[4096];
 
         while (true) {
@@ -74,12 +113,55 @@ public class Router {
             socket.receive(packet);
 
             byte[] copy = Arrays.copyOf(packet.getData(), packet.getLength());
-            DatagramPacket safe = new DatagramPacket(copy, copy.length,
-                    packet.getAddress(), packet.getPort());
+            DatagramPacket safe = new DatagramPacket(
+                copy, copy.length, packet.getAddress(), packet.getPort());
 
             es.submit(() -> handlePacket(safe, socket));
         }
     }
+
+    private void initializeRoutingTable() {
+        System.out.println("[" + me.id + "] Initializing routing table...");
+
+        for (Device neighbor : neighbors) {
+            String linkId = me.id + "-" + neighbor.id;
+            String subnet = linkToSubnet.get(linkId);
+
+            if (subnet != null) {
+                routingTable.put(subnet, new RoutingEntry(neighbor.id, 1));
+                neighborCosts.put(neighbor.id, 1);
+                System.out.println("[" + me.id + "] Added route to " + subnet
+                        + " via " + neighbor.id + " (cost=1)");
+            }
+        }
+        System.out.println();
+        printRoutingTable();
+    }
+
+
+    private void broadcastDistanceVector(){
+        Map<String, Integer> myDV = new HashMap<>();
+        for (Map.Entry<String, RoutingEntry> e : routingTable.entrySet()) {
+            myDV.put(e.getKey(), e.getValue().cost);
+        }
+
+        String dvMessage = serializeDV(me.id, myDV);
+
+        for (Device neighbor : neighbors) {
+            try {
+                DatagramSocket socket = new DatagramSocket();
+                byte[] data = dvMessage.getBytes();
+                DatagramPacket packet = new DatagramPacket(
+                        data, data.length,
+                        InetAddress.getByName(neighbor.ip),
+                        neighbor.port
+                );
+                socket.send(packet);
+                System.out.println("[" + me.id + "] Sent DV to " + neighbor.id + "(subnets = " + myDV.size() + ") \n");
+        }
+    }
+
+
 
     private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
         try {
