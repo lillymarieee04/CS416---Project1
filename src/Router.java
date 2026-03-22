@@ -14,6 +14,28 @@ public class Router {
     private ExecutorService es = Executors.newFixedThreadPool(4);
     private Map<String, String> forwardingTable = new HashMap<>();
 
+    private Map<String, RoutingEntry> routingTable = new HashMap<>();
+    private Map<String, Map<String, Integer>> neighborsDVs = new HashMap<>();
+    private Map<String, Integer> neighborCosts = new HashMap<>();
+
+
+    private Map<String, String> linkToSubnet = new HashMap<>();
+
+    class RoutingEntry {
+        String nextHop;
+        int cost;
+
+        RoutingEntry(String nextHop, int cost) {
+            this.nextHop = nextHop;
+            this.cost = cost;
+        }
+
+        @Override
+        public String toString() {
+            return "via " + nextHop + " (cost=" + cost + ")";
+        }    
+    }
+
     public Router(Config config) {
         this.me = config.device;
         this.neighbors = config.neighbors;
