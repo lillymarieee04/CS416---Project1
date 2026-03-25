@@ -104,7 +104,7 @@ public class Router {
 
 
     //Algorithm
-    private void runBellmanFord() {
+    private void  BellmanFordAlgo() {
         boolean updated = false;
         int linkCost = 1; // Project Requirement: Uniform cost of 1
 
@@ -152,7 +152,7 @@ public class Router {
             }
 
             neighborsDVs.put(senderID, neighborDV);
-            runBellmanFord();
+            BellmanFordAlgo();
 
         } catch (Exception e) {
             System.err.println("Error parsing DV: " + e.getMessage());
