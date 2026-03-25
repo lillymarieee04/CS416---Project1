@@ -3,7 +3,7 @@
 # ID  realIP  port  [virtualIPs...]  [gateway]
 
 A   10.222.85.56 5001   net1.A     net1.R1
-B   10.1222.46.160 5002   net1.B     net1.R1
+B   10.222.46.160 5002   net1.B     net1.R1
 
 C   10.222.10.189 5003   net3.C     net3.R2
 D   10.222.38.27 5004   net3.D     net3.R2
