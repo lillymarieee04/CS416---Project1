@@ -12,12 +12,12 @@ public class ConfigParser {
             String line;
             while ((line = br.readLine()) != null) {
                 line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) continue;
+                if (line.isEmpty() || line.startsWith("#") || line.startsWith("SUBNET")) continue;
 
                 String[] parts = line.split("\\s+");
 
-                // Switch to links section when we see a 2-token line after devices are loaded
-                if (parts.length == 2 && devices.size() > 0) {
+                // Logic to switch to link section
+                if (parts.length == 2 && devices.size() > 0 && !readingLinks) {
                     readingLinks = true;
                 }
 
@@ -27,10 +27,18 @@ public class ConfigParser {
                     String ip   = parts[1];
                     int    port = Integer.parseInt(parts[2]);
                     Device d    = new Device(id, ip, port);
-                    // parts[3] = virtualIP (hosts and routers only)
-                    if (parts.length >= 4) d.virtualIP = parts[3];
-                    // parts[4] = gateway virtual IP (hosts only)
-                    if (parts.length >= 5) d.gateway   = parts[4];
+
+                    if (id.startsWith("R")) {
+                        // For Routers: Collect all remaining tokens as a space-separated string of subnets
+                        StringBuilder vips = new StringBuilder();
+                        for (int i = 3; i < parts.length; i++) {
+                            vips.append(parts[i]).append(" ");
+                        }
+                        d.virtualIP = vips.toString().trim();
+                    } else if (id.length() == 1) { // It's a Host (A, B, C)
+                        if (parts.length >= 4) d.virtualIP = parts[3];
+                        if (parts.length >= 5) d.gateway   = parts[4];
+                    }
                     devices.put(id, d);
                 } else {
                     if (parts.length != 2) continue;

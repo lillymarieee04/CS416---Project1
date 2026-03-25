@@ -25,7 +25,7 @@ public class Host {
         if (me.gateway == null) {
             throw new RuntimeException("Host " + me.id + " has no gateway in config");
         }
-        this.gatewayMAC = extractId(me.gateway); // "net1.R1" -> "R1"
+        this.gatewayMAC = extractId(me.gateway);
     }
 
     private static String extractId(String virtualIP) {
@@ -43,7 +43,7 @@ public class Host {
 
         Thread receiverThread = new Thread(() -> {
             try {
-                byte[] buffer = new byte[1024];
+                byte[] buffer = new byte[4096];
                 while (true) {
                     DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                     socket.receive(packet);
@@ -51,10 +51,9 @@ public class Host {
                     String msg = new String(packet.getData(), 0, packet.getLength());
                     Frame frame = new Frame(msg);
 
-                    if (frame.dst.equals(me.id)) {
+                    // Only display frames of type 0 (DATA) intended for this host
+                    if (frame.type == 0 && frame.dst.equals(me.id)) {
                         System.out.println("\n[RECEIVED] From " + frame.srcIP + ": " + frame.payload);
-                    } else {
-                        System.out.println("\n[DEBUG] Flooded frame not for me (dst=" + frame.dst + ")");
                     }
                     System.out.print(me.id + "> ");
                 }
@@ -71,7 +70,7 @@ public class Host {
     private void sendFrames() {
         Scanner scanner = new Scanner(System.in);
         System.out.println("Enter messages as: <destVirtualIP> <message>");
-        System.out.println("Example: net3.D hello");
+        System.out.println("Example: net3.C hello");
         System.out.println();
 
         while (true) {
@@ -86,11 +85,11 @@ public class Host {
                     continue;
                 }
 
-                String destVirtualIP = parts[0]; // e.g. "net3.D"
+                String destVirtualIP = parts[0];
                 String message       = parts[1];
 
-
-                String frameString = me.id + ":" + gatewayMAC + ":" + myVirtualIP + ":" + destVirtualIP + ":" + message;
+                // Prepend '0:' to indicate this is a DATA packet
+                String frameString = "0:" + me.id + ":" + gatewayMAC + ":" + myVirtualIP + ":" + destVirtualIP + ":" + message;
 
                 byte[] data = frameString.getBytes();
                 DatagramPacket packet = new DatagramPacket(
@@ -103,7 +102,6 @@ public class Host {
 
             } catch (Exception e) {
                 System.err.println("Error sending frame: " + e.getMessage());
-                e.printStackTrace();
             }
         }
     }
