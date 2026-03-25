@@ -177,7 +177,6 @@ public class Router {
 
     private void handleUserPacket(Frame frame, DatagramSocket socket) {
         try {
-            if (!frame.dst.equals(me.id)) return;
 
             String dstSubnet = frame.dstIP.substring(0, frame.dstIP.indexOf('.'));
             RoutingEntry route = routingTable.get(dstSubnet);
@@ -187,11 +186,40 @@ public class Router {
                 return;
             }
 
-            Device nextHop = findNeighbor(route.nextHop);
-            if (nextHop == null) return;
+            Device nextHop;
+            String newDstMAC;
 
-            // Determine if next hop is a router or a switch (host)
-            String newDstMAC = route.nextHop.startsWith("R") ? route.nextHop : extractId(frame.dstIP);
+// Check if destination subnet is directly connected
+            boolean directlyConnected = false;
+
+            for (String vip : me.virtualIPs) {
+                String mySubnet = vip.substring(0, vip.indexOf('.'));
+                if (mySubnet.equals(dstSubnet)) {
+                    directlyConnected = true;
+                    break;
+                }
+            }
+
+            if (directlyConnected) {
+                // FINAL HOP
+                newDstMAC = extractId(frame.dstIP);
+
+                // Send toward switch (not router)
+                nextHop = null;
+                for (Device neighbor : neighbors) {
+                    if (neighbor.id.startsWith("S")) {
+                        nextHop = neighbor;
+                        break;
+                    }
+                }
+
+            } else {
+                // NORMAL ROUTING
+                nextHop = findNeighbor(route.nextHop);
+                newDstMAC = route.nextHop;
+            }
+
+            if (nextHop == null) return;
 
             Frame outFrame = new Frame(
                     me.id + ":" + newDstMAC + ":" +
@@ -204,7 +232,11 @@ public class Router {
             );
             socket.send(outPacket);
 
-            System.out.println("[" + me.id + "] FORWARDED " + frame.payload + " to " + route.nextHop);
+            if (directlyConnected && nextHop != null) {
+                System.out.println("[" + me.id + "] FORWARDED " + frame.payload + " to " + nextHop.id);
+            } else {
+                System.out.println("[" + me.id + "] FORWARDED " + frame.payload + " to " + route.nextHop);
+            }
 
         } catch (Exception e) {
             e.printStackTrace();

@@ -9,8 +9,9 @@ public class ConfigParser {
         List<String[]> links = new ArrayList<>();
         Map<String, String> subnetMap = new HashMap<>();
 
-        boolean readingLinks = false;
-        boolean readingSubnets = false;
+        boolean inDevices = true;
+        boolean inLinks = false;
+        boolean inSubnets = false;
 
         try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
             String line;
@@ -22,14 +23,19 @@ public class ConfigParser {
 
                 String[] parts = line.split("\\s+");
 
-                // Detect SUBNET section
+                // -------- SECTION DETECTION --------
                 if (parts[0].equalsIgnoreCase("SUBNET")) {
-                    readingSubnets = true;
+                    inDevices = false;
+                    inLinks = false;
+                    inSubnets = true;
+                }
+                else if (parts.length == 2 && !inSubnets) {
+                    inDevices = false;
+                    inLinks = true;
                 }
 
-                // Handle SUBNET lines
-                if (readingSubnets && parts[0].equalsIgnoreCase("SUBNET")) {
-                    // SUBNET R1 S1 net1
+                // -------- SUBNET PARSING --------
+                if (inSubnets && parts[0].equalsIgnoreCase("SUBNET")) {
                     String node1 = parts[1];
                     String node2 = parts[2];
                     String subnet = parts[3];
@@ -39,13 +45,8 @@ public class ConfigParser {
                     continue;
                 }
 
-                // Detect links section
-                if (parts.length == 2 && devices.size() > 0 && !readingSubnets) {
-                    readingLinks = true;
-                }
-
-                // DEVICE PARSING
-                if (!readingLinks && !readingSubnets) {
+                // -------- DEVICE PARSING --------
+                if (inDevices) {
                     if (parts.length < 3) continue;
 
                     String id = parts[0];
@@ -54,30 +55,31 @@ public class ConfigParser {
 
                     Device d = new Device(id, ip, port);
 
-                    // Handle variable-length virtual IPs + optional gateway
-                    List<String> virtualIPs = new ArrayList<>();
-
+                    // Parse virtual IPs (netX.Y format)
+                    List<String> vips = new ArrayList<>();
                     for (int i = 3; i < parts.length; i++) {
                         if (parts[i].contains(".")) {
-                            virtualIPs.add(parts[i]);
+                            vips.add(parts[i]);
                         }
                     }
 
-                    if (!virtualIPs.isEmpty()) {
-                        d.virtualIP = virtualIPs.get(0); // keep compatibility
-                        d.virtualIPs = virtualIPs;       //from Device
+                    if (!vips.isEmpty()) {
+                        d.virtualIPs = vips;
+                        d.virtualIP = vips.get(0); // for hosts compatibility
                     }
 
-                    // Hosts have gateway as last element
-                    if (parts.length >= 5) {
-                        d.gateway = parts[parts.length - 1];
+                    // Only hosts should have gateways
+                    if (id.startsWith("A") || id.startsWith("B") || id.startsWith("C")) {
+                        if (parts.length >= 5) {
+                            d.gateway = parts[parts.length - 1];
+                        }
                     }
 
                     devices.put(id, d);
                 }
 
-                // LINK PARSING
-                else if (readingLinks && !readingSubnets) {
+                // -------- LINK PARSING --------
+                else if (inLinks) {
                     if (parts.length == 2) {
                         links.add(new String[]{parts[0], parts[1]});
                     }
@@ -104,7 +106,6 @@ public class ConfigParser {
         }
 
         Config config = new Config(me, neighbors);
-
         config.subnetMap = subnetMap;
 
         return config;
