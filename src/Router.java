@@ -13,8 +13,8 @@ public class Router {
     private ExecutorService es = Executors.newFixedThreadPool(4);
 
     // Dynamic Routing Structures
-    private Map<String, RoutingEntry> routingTable = new HashMap<>();
-    private Map<String, Map<String, Integer>> neighborsDVs = new HashMap<>();
+    private Map<String, RoutingEntry> routingTable = Collections.synchronizedMap(new HashMap<>());
+    private Map<String, Map<String, Integer>> neighborsDVs = Collections.synchronizedMap(new HashMap<>());
     private Map<String, Integer> neighborCosts = new HashMap<>();
     private Map<String, String> linkToSubnet = new HashMap<>();
 
@@ -30,17 +30,17 @@ public class Router {
         @Override
         public String toString() {
             return "via " + nextHop + " (cost=" + cost + ")";
-        }    
+        }
     }
 
     public Router(Config config) {
         this.me = config.device;
         this.neighbors = config.neighbors;
-      //  initializeSubnetMappings();
+        //  initializeSubnetMappings();
     }
 
 
-    
+
     //Need to find a better way to do this, maybe add subnet info to the config file? For now, hardcoding based on topology diagram
 
 
@@ -61,14 +61,33 @@ public class Router {
     //     linkToSubnet.put("R4-R6", "net10"); linkToSubnet.put("R6-R4", "net10");
     // }
 
+    private void initializeDirectRoutes() {
+        // Add this router's own virtual subnet at cost 0
+        if (me.virtualIP != null) {
+            String mySubnet = me.virtualIP.substring(0, me.virtualIP.lastIndexOf('.'));
+            routingTable.put(mySubnet, new RoutingEntry(me.id, 0));
+            System.out.println("[" + me.id + "] Direct route: " + mySubnet + " (cost=0)");
+        }
+        // Add directly connected neighbor subnets at cost 1
+        for (Device neighbor : neighbors) {
+            if (neighbor.virtualIP != null) {
+                String subnet = neighbor.virtualIP.substring(0, neighbor.virtualIP.lastIndexOf('.'));
+                if (!routingTable.containsKey(subnet)) {
+                    routingTable.put(subnet, new RoutingEntry(neighbor.id, 1));
+                    System.out.println("[" + me.id + "] Direct route: " + subnet + " via " + neighbor.id + " (cost=1)");
+                }
+            }
+        }
+    }
+
     public void start() throws Exception {
         DatagramSocket socket = new DatagramSocket(me.port);
         System.out.println("Router " + me.id + " started (Distance Vector Routing)");
         System.out.println("Listening on Port: " + me.port + "\n");
 
-   
+        initializeDirectRoutes();
         broadcastDistanceVector();
-      
+
 
         byte[] buffer = new byte[4096];
         while (true) {
@@ -77,39 +96,40 @@ public class Router {
 
             byte[] copy = Arrays.copyOf(packet.getData(), packet.getLength());
             DatagramPacket safe = new DatagramPacket(
-                copy, copy.length, packet.getAddress(), packet.getPort());
+                    copy, copy.length, packet.getAddress(), packet.getPort());
 
             es.submit(() -> handlePacket(safe, socket));
         }
     }
 
 
-    //Algorithm 
+    //Algorithm
     private void runBellmanFord() {
         boolean updated = false;
         int linkCost = 1; // Project Requirement: Uniform cost of 1
 
         for (String neighborId : neighborsDVs.keySet()) {
             Map<String, Integer> neighborDV = neighborsDVs.get(neighborId);
-            
+
             for (Map.Entry<String, Integer> entry : neighborDV.entrySet()) {
                 String subnet = entry.getKey();
                 int totalCost = linkCost + entry.getValue();
-                
+
                 RoutingEntry currentEntry = routingTable.get(subnet);
-                
+
                 // Bellman-Ford Update Rule: If subnet is new OR path is shorter
-                if (currentEntry == null || totalCost < currentEntry.cost) {
+                // Never overwrite a direct route (cost 0) with a learned one
+                if (currentEntry == null || (totalCost < currentEntry.cost && currentEntry.cost != 0)) {
                     routingTable.put(subnet, new RoutingEntry(neighborId, totalCost));
                     updated = true;
-                    System.out.println("[" + me.id + "] Updated route: " + subnet + 
-                                       " via " + neighborId + " (cost=" + totalCost + ")");
+                    System.out.println("[" + me.id + "] Updated route: " + subnet +
+                            " via " + neighborId + " (cost=" + totalCost + ")");
                 }
             }
         }
-        
+
         if (updated) {
-            
+
             broadcastDistanceVector();
         }
     }
@@ -119,7 +139,7 @@ public class Router {
             String[] parts = dvMessage.split(":", 3);
             String senderID = parts[1];
             String dvData = parts[2];
-        
+
             Map<String, Integer> neighborDV = new HashMap<>();
             if (!dvData.isEmpty()) {
                 String[] entries = dvData.split(",");
@@ -142,7 +162,7 @@ public class Router {
     private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
         try {
             String msg = new String(packet.getData(), 0, packet.getLength());
-            
+
             // Differentiate between Routing Updates and User Packets
             if (msg.startsWith("DV:")) {
                 handleDVUpdate(msg);
@@ -172,20 +192,20 @@ public class Router {
 
             // Determine if next hop is a router or a switch (host)
             String newDstMAC = route.nextHop.startsWith("R") ? route.nextHop : extractId(frame.dstIP);
-            
+
             Frame outFrame = new Frame(
-                me.id + ":" + newDstMAC + ":" + 
-                frame.srcIP + ":" + frame.dstIP + ":" + frame.payload
+                    me.id + ":" + newDstMAC + ":" +
+                            frame.srcIP + ":" + frame.dstIP + ":" + frame.payload
             );
-            
+
             byte[] data = outFrame.toString().getBytes();
             DatagramPacket outPacket = new DatagramPacket(
-                data, data.length, InetAddress.getByName(nextHop.ip), nextHop.port
+                    data, data.length, InetAddress.getByName(nextHop.ip), nextHop.port
             );
             socket.send(outPacket);
-            
+
             System.out.println("[" + me.id + "] FORWARDED " + frame.payload + " to " + route.nextHop);
-            
+
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -206,7 +226,7 @@ public class Router {
             // Try-with-resources handles closing the socket to prevent leaks
             try (DatagramSocket sendSocket = new DatagramSocket()) {
                 DatagramPacket packet = new DatagramPacket(
-                    data, data.length, InetAddress.getByName(neighbor.ip), neighbor.port
+                        data, data.length, InetAddress.getByName(neighbor.ip), neighbor.port
                 );
                 sendSocket.send(packet);
             } catch (Exception e) {
