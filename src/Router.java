@@ -63,10 +63,10 @@ public class Router {
 
     private void initializeDirectRoutes() {
         // Add this router's own virtual subnet at cost 0
-        if (me.virtualIP != null) {
-            String mySubnet = me.virtualIP.substring(0, me.virtualIP.lastIndexOf('.'));
-            routingTable.put(mySubnet, new RoutingEntry(me.id, 0));
-            System.out.println("[" + me.id + "] Direct route: " + mySubnet + " (cost=0)");
+        for (String vip : me.virtualIPs) {
+            String subnet = vip.substring(0, vip.lastIndexOf('.'));
+            routingTable.put(subnet, new RoutingEntry(me.id, 0));
+            System.out.println("[" + me.id + "] Direct route: " + subnet + " (cost=0)");
         }
         // Add directly connected neighbor subnets at cost 1
         for (Device neighbor : neighbors) {
@@ -104,7 +104,7 @@ public class Router {
 
 
     //Algorithm
-    private void runBellmanFord() {
+    private void  BellmanFordAlgo() {
         boolean updated = false;
         int linkCost = 1; // Project Requirement: Uniform cost of 1
 
@@ -152,7 +152,7 @@ public class Router {
             }
 
             neighborsDVs.put(senderID, neighborDV);
-            runBellmanFord();
+            BellmanFordAlgo();
 
         } catch (Exception e) {
             System.err.println("Error parsing DV: " + e.getMessage());
