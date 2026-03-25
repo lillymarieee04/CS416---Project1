@@ -30,3 +30,17 @@ R2 S2
 
 S2 C
 S2 D
+
+
+# Subnet format: SUBNET <Node1> <Node2> <SubnetName>
+SUBNET R1 S1 net1
+SUBNET R3 S2 net2
+SUBNET R6 S3 net3
+SUBNET R1 R2 net4
+SUBNET R1 R3 net5
+SUBNET R2 R3 net6
+SUBNET R2 R4 net7
+SUBNET R3 R5 net8
+SUBNET R4 R5 net9
+SUBNET R4 R6 net10
+
