@@ -63,10 +63,10 @@ public class Router {
 
     private void initializeDirectRoutes() {
         // Add this router's own virtual subnet at cost 0
-        if (me.virtualIP != null) {
-            String mySubnet = me.virtualIP.substring(0, me.virtualIP.lastIndexOf('.'));
-            routingTable.put(mySubnet, new RoutingEntry(me.id, 0));
-            System.out.println("[" + me.id + "] Direct route: " + mySubnet + " (cost=0)");
+        for (String vip : me.virtualIPs) {
+            String subnet = vip.substring(0, vip.lastIndexOf('.'));
+            routingTable.put(subnet, new RoutingEntry(me.id, 0));
+            System.out.println("[" + me.id + "] Direct route: " + subnet + " (cost=0)");
         }
         // Add directly connected neighbor subnets at cost 1
         for (Device neighbor : neighbors) {
