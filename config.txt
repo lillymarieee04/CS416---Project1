@@ -5,18 +5,19 @@
 A   10.222.118.208 5001   net1.A     net1.R1
 B   10.222.13.68 5002   net1.B     net1.R1
 
-C   10.222.10.189 5003   net3.C     net3.R2
-D   10.222.108.76 5004   net3.D     net3.R2
+C   10.222.10.189 5003   net2.C     net2.R3
+D   10.222.108.176 5004   net2.D     net2.R3
 
 S1  10.222.10.189 6001
-S2  10.222.108.76 6002
+S2  10.222.108.176 6002
+S3 10.222.13.68 6003
 
-R1  10.222.10.189 7001   net1.R1   net2.R1
-R2  10.222.38.27 7002   net2.R2   net3.R2
-R3  10.222.10.189 7001   net1.R3  net2.R3
-R4  10.222.38.27 7002   net2.R4   net3.R4
-R5  10.222.10.189 7001   net1.R5   net2.R5
-R6  10.222.38.27 7002   net2.R6   net3.R6
+R1  10.222.10.189 7001   net1.R1   net4.R1   net5.R1
+R2  10.222.108.176 7002   net4.R2   net6.R2   net7.R2
+R3  10.222.10.189 7003   net2.R3   net5.R3   net6.R3   net8.R3
+R4  10.222.108.176 7004   net7.R4   net9.R4   net10.R4
+R5  10.222.10.189 7005   net8.R5   net9.R5
+R6  10.222.108.176 7006   net3.R6   net10.R6
 
 
 # Links
@@ -25,15 +26,20 @@ R6  10.222.38.27 7002   net2.R6   net3.R6
 
 A S1
 B S1
+C S2
+D S2
 
 S1 R1
+S2 R3
+S3 R6
 
 R1 R2
-
-R2 S2
-
-S2 C
-S2 D
+R1 R3
+R2 R3
+R2 R4
+R3 R5
+R4 R5
+R4 R6
 
 
 # Subnet format: SUBNET <Node1> <Node2> <SubnetName>
@@ -47,4 +53,3 @@ SUBNET R2 R4 net7
 SUBNET R3 R5 net8
 SUBNET R4 R5 net9
 SUBNET R4 R6 net10
-
