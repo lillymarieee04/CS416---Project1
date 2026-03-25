@@ -38,8 +38,13 @@ public class Switch {
     }
 
     private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
+        String msg = new String(packet.getData(), 0, packet.getLength());
+
+        if (msg.startsWith("DV:")) {
+            return;
+        }
         try {
-            String msg = new String(packet.getData(), 0, packet.getLength());
+            msg = new String(packet.getData(), 0, packet.getLength());
             Frame frame = new Frame(msg);
 
             Device incomingPort = findNeighbor(frame.src);
