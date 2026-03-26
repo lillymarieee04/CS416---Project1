@@ -1,167 +1,442 @@
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
+import java.io.*;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.*;
 
-public class Router {
-    private Device me;
-    private List<Device> neighbors;
-    private ExecutorService es = Executors.newFixedThreadPool(4);
+public class VirtualRouter {
 
-    // Subnet -> Distance (cost)
-    private Map<String, Integer> distanceVector = new ConcurrentHashMap<>();
-    // Subnet -> NextHop Device ID
-    private Map<String, String> forwardingTable = new ConcurrentHashMap<>();
+    record Port(String ip, int port) {}
 
-    public Router(Config config) {
-        this.me = config.device;
-        this.neighbors = config.neighbors;
-        initializeLocalSubnets();
-    }
+    static class RouteEntry {
+        int cost;
+        String nextHopRouter;
+        String outDeviceId;
 
-    /**
-     * Project 3 requirement: Automatically discover directly connected subnets.
-     * Based on virtualIPs assigned in config.txt (e.g., net1.R1).
-     */
-    private void initializeLocalSubnets() {
-        if (me.virtualIP != null) {
-            // A router might have multiple virtual IPs separated by space in your config
-            String[] vips = me.virtualIP.split("\\s+");
-            for (String vip : vips) {
-                String subnet = vip.substring(0, vip.indexOf('.'));
-                distanceVector.put(subnet, 0); // Cost to local subnet is 0
-                // For local subnets, the "next hop" is the edge switch or host directly
-                // We'll infer the nextHop from neighbors during routing updates
-            }
+        RouteEntry(int cost, String nextHopRouter, String outDeviceId) {
+            this.cost = cost;
+            this.nextHopRouter = nextHopRouter;
+            this.outDeviceId = outDeviceId;
         }
     }
 
-    public void start() throws Exception {
-        DatagramSocket socket = new DatagramSocket(me.port);
-        System.out.println("Router " + me.id + " started (Distance Vector enabled)");
+    private final String myId;
+    private final String configPath;
 
-        // Thread to periodically broadcast distance vector to neighbors
-        new Thread(() -> {
+    private final Map<String, Port> devices = new HashMap<>();
+    private final Map<String, List<String>> adj = new HashMap<>();
+    private final Map<String, List<String>> vipByDevice = new HashMap<>();
+    private final Map<String, String> hostGateway = new HashMap<>();
+
+    private final Set<String> myDirectSubnets = new HashSet<>();
+    private final Set<String> routerNeighbors = new HashSet<>();
+    private final Map<String, RouteEntry> routingTable = new HashMap<>();
+    private final Map<String, String> sharedSubnetWithRouter = new HashMap<>();
+
+    private Port me;
+    private DatagramSocket socket;
+
+    public VirtualRouter(String myId, String configPath) {
+        this.myId = myId.trim();
+        this.configPath = configPath.trim();
+    }
+
+    public static void main(String[] args) throws Exception {
+        if (args.length != 2) {
+            System.out.println("Usage: java VirtualRouter <ROUTER_ID> <CONFIG_FILE>");
+            return;
+        }
+
+        VirtualRouter r = new VirtualRouter(args[0], args[1]);
+        r.loadConfig();
+        r.initDynamicRouting();
+        r.startPeriodicUpdates();
+        r.run();
+    }
+
+    private void loadConfig() throws Exception {
+        try (BufferedReader br = new BufferedReader(new FileReader(configPath))) {
+            String line;
+            int lineNo = 0;
+
+            while ((line = br.readLine()) != null) {
+                lineNo++;
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+
+                String[] t = line.split("\\s+");
+                String kind = t[0].toUpperCase(Locale.ROOT);
+
+                switch (kind) {
+                    case "DEVICE" -> {
+                        if (t.length < 4) {
+                            throw new IllegalArgumentException("Bad DEVICE line at " + lineNo + ": " + line);
+                        }
+                        String id = t[1];
+                        String ip = t[2];
+                        int port = Integer.parseInt(t[3]);
+                        devices.put(id, new Port(ip, port));
+                        adj.putIfAbsent(id, new ArrayList<>());
+                        vipByDevice.putIfAbsent(id, new ArrayList<>());
+                    }
+                    case "LINK" -> {
+                        if (t.length < 3) {
+                            throw new IllegalArgumentException("Bad LINK line at " + lineNo + ": " + line);
+                        }
+                        String a = t[1];
+                        String b = t[2];
+                        adj.putIfAbsent(a, new ArrayList<>());
+                        adj.putIfAbsent(b, new ArrayList<>());
+                        adj.get(a).add(b);
+                        adj.get(b).add(a);
+                    }
+                    case "VIRTUAL_IP" -> {
+                        if (t.length < 3) {
+                            throw new IllegalArgumentException("Bad VIRTUAL_IP line at " + lineNo + ": " + line);
+                        }
+                        String id = t[1];
+                        String vip = t[2];
+                        vipByDevice.putIfAbsent(id, new ArrayList<>());
+                        vipByDevice.get(id).add(vip);
+                    }
+                    case "GATEWAY" -> {
+                        if (t.length < 3) {
+                            throw new IllegalArgumentException("Bad GATEWAY line at " + lineNo + ": " + line);
+                        }
+                        hostGateway.put(t[1], t[2]);
+                    }
+                    default -> {
+                    }
+                }
+            }
+        }
+
+        me = devices.get(myId);
+        if (me == null) {
+            throw new IllegalArgumentException("Missing DEVICE for " + myId);
+        }
+
+        socket = new DatagramSocket(me.port);
+        socket.setReuseAddress(true);
+
+        System.out.println("Router " + myId + " listening on " + me.ip + ":" + me.port);
+        System.out.println("Neighbors: " + adj.getOrDefault(myId, List.of()));
+        System.out.println();
+    }
+
+    private void initDynamicRouting() {
+        for (String vip : vipByDevice.getOrDefault(myId, List.of())) {
+            myDirectSubnets.add(subnetOf(vip));
+        }
+
+        for (String neighbor : adj.getOrDefault(myId, List.of())) {
+            if (isRouter(neighbor)) {
+                routerNeighbors.add(neighbor);
+
+                String shared = findSharedSubnet(myId, neighbor);
+                if (shared != null) {
+                    sharedSubnetWithRouter.put(neighbor, shared);
+                }
+            }
+        }
+
+
+        for (String subnet : myDirectSubnets) {
+            String outDevice = findOutDeviceForDirectSubnet(subnet);
+            routingTable.put(subnet, new RouteEntry(0, null, outDevice));
+        }
+
+        System.out.println("[" + myId + "] Directly connected subnets: " + sorted(myDirectSubnets));
+        System.out.println("[" + myId + "] Router neighbors: " + sorted(routerNeighbors));
+        printRoutingTable();
+
+
+        broadcastDistanceVector();
+    }
+
+    private void startPeriodicUpdates() {
+        Thread t = new Thread(() -> {
             while (true) {
                 try {
-                    broadcastUpdates(socket);
-                    Thread.sleep(5000); // Send updates every 5 seconds
+                    Thread.sleep(2000);
+                    broadcastDistanceVector();
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
-        }).start();
+        });
+        t.setDaemon(true);
+        t.start();
+    }
 
-        byte[] buffer = new byte[4096];
+    private void run() throws Exception {
+        byte[] buf = new byte[8192];
+
         while (true) {
-            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-            socket.receive(packet);
-            byte[] copy = Arrays.copyOf(packet.getData(), packet.getLength());
-            es.submit(() -> handlePacket(new DatagramPacket(copy, copy.length, packet.getAddress(), packet.getPort()), socket));
-        }
-    }
+            DatagramPacket pkt = new DatagramPacket(buf, buf.length);
+            socket.receive(pkt);
 
-    private void broadcastUpdates(DatagramSocket socket) throws Exception {
-        // Format: subnet1:dist1,subnet2:dist2...
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, Integer> entry : distanceVector.entrySet()) {
-            if (sb.length() > 0) sb.append(",");
-            sb.append(entry.getKey()).append(":").append(entry.getValue());
-        }
+            String frame = new String(pkt.getData(), 0, pkt.getLength(), StandardCharsets.UTF_8).trim();
+            String[] p = frame.split(":", 5);
+            if (p.length < 5) continue;
 
-        // Type 1 = Routing Update
-        String routingPayload = "1:" + me.id + ":BROADCAST:0.0.0.0:0.0.0.0:" + sb.toString();
-        byte[] data = routingPayload.getBytes();
+            String srcMac = p[0].trim();
+            String dstMac = p[1].trim();
+            String srcVip = p[2].trim();
+            String dstVip = p[3].trim();
+            String msg = p[4];
 
-        for (Device neighbor : neighbors) {
-            DatagramPacket p = new DatagramPacket(data, data.length, InetAddress.getByName(neighbor.ip), neighbor.port);
-            socket.send(p);
-        }
-    }
-
-    private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
-        try {
-            String msg = new String(packet.getData(), 0, packet.getLength());
-            String[] parts = msg.split(":", 6); // 0:type, 1:src, 2:dst, 3:srcIP, 4:dstIP, 5:payload
-
-            int type = Integer.parseInt(parts[0]);
-            String srcId = parts[1];
-            String dstId = parts[2];
-            String payload = parts[5];
-
-            if (type == 1) {
-                processRoutingUpdate(srcId, payload);
-            } else {
-                processDataPacket(msg, parts, socket);
+            if (!dstMac.equals(myId)) {
+                continue;
             }
-        } catch (Exception e) {
-            System.err.println("Error handling packet: " + e.getMessage());
+
+            if (isRoutingPacket(srcVip, dstVip, msg)) {
+                handleRoutingPacket(srcMac, msg);
+            } else {
+                handleUserPacket(srcMac, dstMac, srcVip, dstVip, msg);
+            }
         }
     }
 
-    private void processRoutingUpdate(String neighborId, String payload) {
+    private void handleRoutingPacket(String srcMac, String msg) throws Exception {
+        if (!isRouter(srcMac)) return;
+
+        boolean changed = updateFromNeighbor(srcMac, msg);
+
+        System.out.println("[" + myId + "] received routing update from " + srcMac);
+        if (changed) {
+            printRoutingTable();
+            broadcastDistanceVector();
+        }
+    }
+
+    private void handleUserPacket(String srcMac, String dstMac, String srcVip, String dstVip, String msg) throws Exception {
+        System.out.println("[" + myId + "] RECEIVED");
+        printFrame(srcMac, dstMac, srcVip, dstVip, msg);
+
+        String dstSubnet = subnetOf(dstVip);
+        RouteEntry entry = routingTable.get(dstSubnet);
+
+        if (entry == null || entry.outDeviceId == null) {
+            System.out.println("[" + myId + "] DROP (no route)\n");
+            return;
+        }
+
+        Port outNeighbor = devices.get(entry.outDeviceId);
+        if (outNeighbor == null) {
+            System.out.println("[" + myId + "] DROP (missing out device " + entry.outDeviceId + ")\n");
+            return;
+        }
+
+        String nextHopMac;
+        if (entry.nextHopRouter == null) {
+            nextHopMac = idOf(dstVip);
+        } else {
+            nextHopMac = entry.nextHopRouter;
+        }
+
+        String outFrame = myId + ":" + nextHopMac + ":" + srcVip + ":" + dstVip + ":" + msg;
+
+        System.out.println("[" + myId + "] FORWARDED");
+        printFrame(myId, nextHopMac, srcVip, dstVip, msg);
+        System.out.println();
+
+        send(outFrame, outNeighbor);
+    }
+
+    private synchronized boolean updateFromNeighbor(String neighborRouter, String msg) {
+        Map<String, Integer> neighborDV = parseDvMessage(msg);
         boolean changed = false;
-        String[] updates = payload.split(",");
 
-        for (String update : updates) {
-            String[] kv = update.split(":");
-            String subnet = kv[0];
-            int neighborDist = Integer.parseInt(kv[1]);
-            int newDist = neighborDist + 1; // Uniform cost of 1
+        for (Map.Entry<String, Integer> e : neighborDV.entrySet()) {
+            String subnet = e.getKey();
+            int neighborCost = e.getValue();
 
-            if (!distanceVector.containsKey(subnet) || newDist < distanceVector.get(subnet)) {
-                distanceVector.put(subnet, newDist);
-                forwardingTable.put(subnet, neighborId);
+            if (neighborCost >= 999999) continue;
+
+            int candidate = neighborCost + 1;
+
+            RouteEntry current = routingTable.get(subnet);
+
+            if (myDirectSubnets.contains(subnet)) {
+                continue;
+            }
+
+            if (current == null || candidate < current.cost ||
+                    (current.nextHopRouter != null && current.nextHopRouter.equals(neighborRouter) && candidate != current.cost)) {
+
+                String outDevice = neighborRouter;
+                routingTable.put(subnet, new RouteEntry(candidate, neighborRouter, outDevice));
                 changed = true;
             }
         }
 
-        if (changed) {
-            System.out.println("[" + me.id + "] Table Updated: " + distanceVector);
+        return changed;
+    }
+
+    private synchronized void broadcastDistanceVector() {
+        for (String neighbor : routerNeighbors) {
+            try {
+                Port target = devices.get(neighbor);
+                String sharedSubnet = sharedSubnetWithRouter.getOrDefault(neighbor, "ROUTING");
+                String srcVip = "ROUTING." + myId;
+                String dstVip = sharedSubnet + "." + neighbor;
+                String msg = buildDvMessage();
+
+                String frame = myId + ":" + neighbor + ":" + srcVip + ":" + dstVip + ":" + msg;
+                send(frame, target);
+            } catch (Exception e) {
+                System.out.println("[" + myId + "] failed to send DV to " + neighbor + ": " + e.getMessage());
+            }
         }
     }
 
-    private void processDataPacket(String raw, String[] parts, DatagramSocket socket) throws Exception {
-        String dstId = parts[2];
-        String dstIP = parts[4];
+    private String buildDvMessage() {
+        List<String> subnets = new ArrayList<>(routingTable.keySet());
+        Collections.sort(subnets);
 
-        if (!dstId.equals(me.id)) return;
-
-        String dstSubnet = dstIP.substring(0, dstIP.indexOf('.'));
-        String nextHopId = forwardingTable.get(dstSubnet);
-
-        if (nextHopId == null) {
-            System.out.println("[" + me.id + "] No route to " + dstSubnet);
-            return;
+        StringBuilder sb = new StringBuilder();
+        sb.append("DV");
+        for (String subnet : subnets) {
+            RouteEntry entry = routingTable.get(subnet);
+            sb.append("|").append(subnet).append("=").append(entry.cost);
         }
-
-        Device outNeighbor = findNeighbor(nextHopId);
-        if (outNeighbor == null) return;
-
-        // Determine destination MAC: if next hop is a router, use its ID; otherwise use the host ID
-        String newDstMAC = nextHopId.startsWith("R") ? nextHopId : extractId(dstIP);
-
-        // Rebuild frame with correct MACs (Type 0 for Data)
-        String forwardMsg = "0:" + me.id + ":" + newDstMAC + ":" + parts[3] + ":" + parts[4] + ":" + parts[5];
-        byte[] data = forwardMsg.getBytes();
-
-        socket.send(new DatagramPacket(data, data.length, InetAddress.getByName(outNeighbor.ip), outNeighbor.port));
+        return sb.toString();
     }
 
-    private Device findNeighbor(String id) {
-        for (Device d : neighbors) if (d.id.equals(id)) return d;
+    private Map<String, Integer> parseDvMessage(String msg) {
+        Map<String, Integer> dv = new HashMap<>();
+        if (msg == null || !msg.startsWith("DV")) return dv;
+
+        String[] parts = msg.split("\\|");
+        for (int i = 1; i < parts.length; i++) {
+            String token = parts[i].trim();
+            int eq = token.indexOf('=');
+            if (eq < 0) continue;
+
+            String subnet = token.substring(0, eq).trim();
+            String costStr = token.substring(eq + 1).trim();
+
+            try {
+                int cost = Integer.parseInt(costStr);
+                dv.put(subnet, cost);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return dv;
+    }
+
+    private boolean isRoutingPacket(String srcVip, String dstVip, String msg) {
+        return srcVip.startsWith("ROUTING.") || dstVip.startsWith("ROUTING.") || msg.startsWith("DV");
+    }
+
+    private void send(String frame, Port target) throws Exception {
+        byte[] data = frame.getBytes(StandardCharsets.UTF_8);
+        InetAddress addr = InetAddress.getByName(target.ip);
+        socket.send(new DatagramPacket(data, data.length, addr, target.port));
+    }
+
+    private String findOutDeviceForDirectSubnet(String subnet) {
+
+        for (String neighbor : adj.getOrDefault(myId, List.of())) {
+            if (!isRouter(neighbor)) continue;
+            for (String vip : vipByDevice.getOrDefault(neighbor, List.of())) {
+                if (subnetOf(vip).equals(subnet)) {
+                    return neighbor;
+                }
+            }
+        }
+
+
+        for (String neighbor : adj.getOrDefault(myId, List.of())) {
+            if (!isSwitch(neighbor)) continue;
+            if (switchTouchesSubnet(neighbor, subnet)) {
+                return neighbor;
+            }
+        }
+
+
+        for (String neighbor : adj.getOrDefault(myId, List.of())) {
+            if (!isRouter(neighbor)) return neighbor;
+        }
+
         return null;
     }
 
-    private String extractId(String virtualIP) {
-        int dot = virtualIP.lastIndexOf('.');
-        return (dot >= 0) ? virtualIP.substring(dot + 1) : virtualIP;
+    private boolean switchTouchesSubnet(String switchId, String subnet) {
+        for (String dev : adj.getOrDefault(switchId, List.of())) {
+            if (dev.equals(myId)) continue;
+
+            for (String vip : vipByDevice.getOrDefault(dev, List.of())) {
+                if (subnetOf(vip).equals(subnet)) {
+                    return true;
+                }
+            }
+
+            String gwVip = hostGateway.get(dev);
+            if (gwVip != null && subnetOf(gwVip).equals(subnet)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    public static void main(String[] args) throws Exception {
-        if (args.length < 1) return;
-        Config config = ConfigParser.parse("config.txt", args[0]);
-        new Router(config).start();
+    private String findSharedSubnet(String routerA, String routerB) {
+        Set<String> aSubnets = new HashSet<>();
+        for (String vip : vipByDevice.getOrDefault(routerA, List.of())) {
+            aSubnets.add(subnetOf(vip));
+        }
+
+        for (String vip : vipByDevice.getOrDefault(routerB, List.of())) {
+            String subnet = subnetOf(vip);
+            if (aSubnets.contains(subnet)) {
+                return subnet;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isRouter(String id) {
+        return id != null && id.toUpperCase(Locale.ROOT).startsWith("R");
+    }
+
+    private static boolean isSwitch(String id) {
+        return id != null && id.toUpperCase(Locale.ROOT).startsWith("S");
+    }
+
+    private static String subnetOf(String vip) {
+        int dot = vip.indexOf('.');
+        return (dot < 0) ? vip : vip.substring(0, dot);
+    }
+
+    private static String idOf(String vip) {
+        int dot = vip.lastIndexOf('.');
+        return (dot < 0) ? vip : vip.substring(dot + 1);
+    }
+
+    private static List<String> sorted(Collection<String> c) {
+        List<String> out = new ArrayList<>(c);
+        Collections.sort(out);
+        return out;
+    }
+
+    private void printRoutingTable() {
+        System.out.println("=== Routing Table (" + myId + ") ===");
+        List<String> keys = new ArrayList<>(routingTable.keySet());
+        Collections.sort(keys);
+
+        for (String subnet : keys) {
+            RouteEntry e = routingTable.get(subnet);
+            String nextHop = (e.nextHopRouter == null) ? "DIRECT" : e.nextHopRouter;
+            System.out.println(subnet + " -> cost=" + e.cost + ", nextHop=" + nextHop + ", out=" + e.outDeviceId);
+        }
+        System.out.println("============================\n");
+    }
+
+    private void printFrame(String srcMac, String dstMac, String srcVip, String dstVip, String msg) {
+        System.out.println("  srcMAC=" + srcMac);
+        System.out.println("  dstMAC=" + dstMac);
+        System.out.println("  srcIP =" + srcVip);
+        System.out.println("  dstIP =" + dstVip);
+        System.out.println("  msg   =" + msg);
     }
 }
