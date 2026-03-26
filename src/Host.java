@@ -51,11 +51,10 @@ public class Host {
                     String msg = new String(packet.getData(), 0, packet.getLength());
                     Frame frame = new Frame(msg);
 
-                    // Only display frames of type 0 (DATA) intended for this host
                     if (frame.type == 0 && frame.dst.equals(me.id)) {
                         System.out.println("\n[RECEIVED] From " + frame.srcIP + ": " + frame.payload);
+                        System.out.print(me.id + "> ");
                     }
-                    System.out.print(me.id + "> ");
                 }
             } catch (Exception e) {
                 System.err.println("Receiver error: " + e.getMessage());
