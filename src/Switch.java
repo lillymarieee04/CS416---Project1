@@ -40,6 +40,33 @@ public class Switch {
     private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
         try {
             String msg = new String(packet.getData(), 0, packet.getLength());
+
+
+            if (msg.startsWith("DV:")) {
+                for (Device neighbor : neighbors) {
+                    try {
+                        byte[] data = msg.getBytes();
+                        DatagramPacket outPacket = new DatagramPacket(
+                                data, data.length,
+                                InetAddress.getByName(neighbor.ip),
+                                neighbor.port
+                        );
+                        socket.send(outPacket);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+                return;
+            }
+
+
+            String[] parts = msg.split(":", 5);
+            if (parts.length < 5) {
+                System.out.println("[" + me.id + "] Dropped malformed packet: " + msg);
+                return;
+            }
+
+
             Frame frame = new Frame(msg);
 
             Device incomingPort = findNeighbor(frame.src);
@@ -49,6 +76,7 @@ public class Switch {
                         + frame.src + ". Dropping.\n");
                 return;
             }
+
 
             if (!switchTable.containsKey(frame.src)) {
                 switchTable.put(frame.src, incomingPort);
@@ -62,7 +90,6 @@ public class Switch {
             if (outgoingPort != null) {
 
                 sendFrame(socket, frame, outgoingPort);
-
             } else {
 
                 for (Device neighbor : neighbors) {
@@ -73,6 +100,7 @@ public class Switch {
             }
 
         } catch (Exception e) {
+            System.out.println("[" + me.id + "] ERROR processing packet");
             e.printStackTrace();
         }
     }
