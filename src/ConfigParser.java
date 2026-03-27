@@ -78,7 +78,7 @@ public class ConfigParser {
                     devices.put(id, d);
                 }
 
-                // -------- LINK PARSING --------
+
                 else if (inLinks) {
                     if (parts.length == 2) {
                         links.add(new String[]{parts[0], parts[1]});

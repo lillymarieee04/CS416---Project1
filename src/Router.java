@@ -33,7 +33,6 @@ public class Router {
     }
 
     private void initializeDirectRoutes() {
-        // Own subnets
         if (me.virtualIPs != null) {
             for (String vip : me.virtualIPs) {
                 String subnet = vip.substring(0, vip.lastIndexOf('.'));
@@ -42,7 +41,6 @@ public class Router {
             }
         }
 
-        // Neighbor subnets
         for (Device neighbor : neighbors) {
             String subnet = subnetMap.get(me.id + "-" + neighbor.id);
 
@@ -126,8 +124,6 @@ public class Router {
     private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
         try {
             String msg = new String(packet.getData(), 0, packet.getLength());
-
-            // Handle DV packets first
             if (msg.startsWith("DV:")) {
                 handleDVUpdate(msg);
                 return;
@@ -152,6 +148,7 @@ public class Router {
                 System.out.println("[" + me.id + "] No route to " + dstSubnet);
                 return;
             }
+            System.out.println("[" + me.id + "] Forwarding Frame: " + frame.toString());
 
             Device nextHop = findNeighbor(route.nextHop);
 
