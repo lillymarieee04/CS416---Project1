@@ -172,13 +172,18 @@ public class Router {
                 newDstMAC = extractId(frame.dstIP);
 
                 nextHop = null;
+
                 for (Device neighbor : neighbors) {
                     if (neighbor.id.startsWith("S")) {
-                        nextHop = neighbor;
-                        break;
+
+                        String subnet = subnetMap.get(me.id + "-" + neighbor.id);
+
+                        if (subnet != null && subnet.equals(dstSubnet)) {
+                            nextHop = neighbor;
+                            break;
+                        }
                     }
                 }
-
             } else {
                 nextHop = findNeighbor(route.nextHop);
                 newDstMAC = route.nextHop;
