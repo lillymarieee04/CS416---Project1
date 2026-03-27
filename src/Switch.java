@@ -38,13 +38,38 @@ public class Switch {
     }
 
     private void handlePacket(DatagramPacket packet, DatagramSocket socket) {
-        String msg = new String(packet.getData(), 0, packet.getLength());
-
-        if (msg.startsWith("DV:")) {
-            return;
-        }
         try {
-            msg = new String(packet.getData(), 0, packet.getLength());
+            String msg = new String(packet.getData(), 0, packet.getLength());
+
+            // DEBUG (optional)
+            // System.out.println("[" + me.id + "] RAW: " + msg);
+
+            // 1. Handle DV packets (DO NOT parse as Frame)
+            if (msg.startsWith("DV:")) {
+                for (Device neighbor : neighbors) {
+                    try {
+                        byte[] data = msg.getBytes();
+                        DatagramPacket outPacket = new DatagramPacket(
+                                data, data.length,
+                                InetAddress.getByName(neighbor.ip),
+                                neighbor.port
+                        );
+                        socket.send(outPacket);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+                return;
+            }
+
+            // 2. Validate BEFORE parsing
+            String[] parts = msg.split(":", 5);
+            if (parts.length < 5) {
+                System.out.println("[" + me.id + "] Dropped malformed packet: " + msg);
+                return;
+            }
+
+            // 3. Safe to parse
             Frame frame = new Frame(msg);
 
             Device incomingPort = findNeighbor(frame.src);
@@ -55,6 +80,7 @@ public class Switch {
                 return;
             }
 
+            // Learn MAC → port mapping
             if (!switchTable.containsKey(frame.src)) {
                 switchTable.put(frame.src, incomingPort);
                 System.out.println("[" + me.id + "] Learned: "
@@ -65,11 +91,10 @@ public class Switch {
             Device outgoingPort = switchTable.get(frame.dst);
 
             if (outgoingPort != null) {
-
+                // Known destination → send directly
                 sendFrame(socket, frame, outgoingPort);
-
             } else {
-
+                // Unknown → flood
                 for (Device neighbor : neighbors) {
                     if (!neighbor.id.equals(incomingPort.id)) {
                         sendFrame(socket, frame, neighbor);
@@ -78,6 +103,7 @@ public class Switch {
             }
 
         } catch (Exception e) {
+            System.out.println("[" + me.id + "] ERROR processing packet");
             e.printStackTrace();
         }
     }

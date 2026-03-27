@@ -99,9 +99,23 @@ public class ConfigParser {
         List<Device> neighbors = new ArrayList<>();
         for (String[] link : links) {
             if (link[0].equals(myId)) {
-                neighbors.add(devices.get(link[1]));
+                Device neighbor = devices.get(link[1]);
+                if (neighbor == null) {
+                    throw new RuntimeException(
+                            "Invalid link: " + link[0] + " -> " + link[1] +
+                                    " (device not found in config)"
+                    );
+                }
+                neighbors.add(neighbor);
             } else if (link[1].equals(myId)) {
-                neighbors.add(devices.get(link[0]));
+                Device neighbor = devices.get(link[0]);
+                if (neighbor == null) {
+                    throw new RuntimeException(
+                            "Invalid link: " + link[0] + " -> " + link[1] +
+                                    " (device not found in config)"
+                    );
+                }
+                neighbors.add(neighbor);
             }
         }
 

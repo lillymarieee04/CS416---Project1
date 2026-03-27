@@ -14,7 +14,6 @@ public class Router {
     private Map<String, RoutingEntry> routingTable = Collections.synchronizedMap(new HashMap<>());
     private Map<String, Map<String, Integer>> neighborsDVs = Collections.synchronizedMap(new HashMap<>());
 
-    // NEW: Use subnet map from config
     private Map<String, String> subnetMap;
 
     class RoutingEntry {
@@ -25,35 +24,31 @@ public class Router {
             this.nextHop = nextHop;
             this.cost = cost;
         }
-
-        public String toString() {
-            return "via " + nextHop + " (cost=" + cost + ")";
-        }
     }
 
     public Router(Config config) {
         this.me = config.device;
         this.neighbors = config.neighbors;
-        this.subnetMap = config.subnetMap; // IMPORTANT
+        this.subnetMap = config.subnetMap;
     }
 
     private void initializeDirectRoutes() {
-        // Add own subnets
+        // Own subnets
         if (me.virtualIPs != null) {
             for (String vip : me.virtualIPs) {
                 String subnet = vip.substring(0, vip.lastIndexOf('.'));
                 routingTable.put(subnet, new RoutingEntry(me.id, 0));
-                System.out.println("[" + me.id + "] Direct route: " + subnet + " (cost=0)");
+                System.out.println("[" + me.id + "] Direct: " + subnet);
             }
         }
 
-        // Add neighbor subnets using subnetMap
+        // Neighbor subnets
         for (Device neighbor : neighbors) {
             String subnet = subnetMap.get(me.id + "-" + neighbor.id);
 
-            if (subnet != null && !routingTable.containsKey(subnet)) {
+            if (subnet != null) {
                 routingTable.put(subnet, new RoutingEntry(neighbor.id, 1));
-                System.out.println("[" + me.id + "] Direct route: " + subnet + " via " + neighbor.id + " (cost=1)");
+                System.out.println("[" + me.id + "] Neighbor route: " + subnet + " via " + neighbor.id);
             }
         }
     }
@@ -91,11 +86,11 @@ public class Router {
 
                 RoutingEntry current = routingTable.get(subnet);
 
-                if (current == null || (cost < current.cost && current.cost != 0)) {
+                if (current == null || cost < current.cost) {
                     routingTable.put(subnet, new RoutingEntry(neighborId, cost));
                     updated = true;
 
-                    System.out.println("[" + me.id + "] Updated route: " + subnet + " via " + neighborId + " cost=" + cost);
+                    System.out.println("[" + me.id + "] Updated: " + subnet + " via " + neighborId);
                 }
             }
         }
@@ -132,20 +127,25 @@ public class Router {
         try {
             String msg = new String(packet.getData(), 0, packet.getLength());
 
+            // Handle DV packets first
             if (msg.startsWith("DV:")) {
                 handleDVUpdate(msg);
-            } else {
-                Frame frame = new Frame(msg);
-                handleUserPacket(frame, socket);
+                return;
             }
+
+            Frame frame = new Frame(msg);
+
+            handleUserPacket(frame, socket);
+
         } catch (Exception e) {
+            System.out.println("[" + me.id + "] ERROR processing packet");
             e.printStackTrace();
         }
     }
 
     private void handleUserPacket(Frame frame, DatagramSocket socket) {
         try {
-            String dstSubnet = frame.dstIP.substring(0, frame.dstIP.indexOf('.'));
+            String dstSubnet = frame.dstIP.substring(0, frame.dstIP.lastIndexOf('.'));
             RoutingEntry route = routingTable.get(dstSubnet);
 
             if (route == null) {
@@ -153,49 +153,17 @@ public class Router {
                 return;
             }
 
-            Device nextHop;
-            String newDstMAC;
+            Device nextHop = findNeighbor(route.nextHop);
 
-            boolean directlyConnected = false;
-
-            if (me.virtualIPs != null) {
-                for (String vip : me.virtualIPs) {
-                    String mySubnet = vip.substring(0, vip.indexOf('.'));
-                    if (mySubnet.equals(dstSubnet)) {
-                        directlyConnected = true;
-                        break;
-                    }
-                }
+            if (nextHop == null) {
+                System.out.println("[" + me.id + "] Next hop not found: " + route.nextHop);
+                return;
             }
 
-            if (directlyConnected) {
-                newDstMAC = extractId(frame.dstIP);
+            // ✅ MODIFY EXISTING FRAME (DO NOT REBUILD WRONG FORMAT)
+            frame.src = me.id;
 
-                nextHop = null;
-
-                for (Device neighbor : neighbors) {
-                    if (neighbor.id.startsWith("S")) {
-
-                        String subnet = subnetMap.get(me.id + "-" + neighbor.id);
-
-                        if (subnet != null && subnet.equals(dstSubnet)) {
-                            nextHop = neighbor;
-                            break;
-                        }
-                    }
-                }
-            } else {
-                nextHop = findNeighbor(route.nextHop);
-                newDstMAC = route.nextHop;
-            }
-
-            if (nextHop == null) return;
-
-            Frame out = new Frame(
-                    me.id + ":" + newDstMAC + ":" + frame.srcIP + ":" + frame.dstIP + ":" + frame.payload
-            );
-
-            byte[] data = out.toString().getBytes();
+            byte[] data = frame.toString().getBytes();
 
             DatagramPacket outPacket = new DatagramPacket(
                     data,
@@ -252,11 +220,6 @@ public class Router {
             if (d.id.equals(id)) return d;
         }
         return null;
-    }
-
-    private static String extractId(String vip) {
-        int dot = vip.lastIndexOf('.');
-        return vip.substring(dot + 1);
     }
 
     public static void main(String[] args) throws Exception {
