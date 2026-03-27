@@ -160,7 +160,6 @@ public class Router {
                 return;
             }
 
-            // ✅ MODIFY EXISTING FRAME (DO NOT REBUILD WRONG FORMAT)
             frame.src = me.id;
 
             byte[] data = frame.toString().getBytes();

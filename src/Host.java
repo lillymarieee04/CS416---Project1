@@ -25,7 +25,6 @@ public class Host {
         this.myVirtualIP = me.virtualIP;
     }
 
-    // ✅ Extract host ID from virtual IP (net2.B → B)
     private static String extractId(String virtualIP) {
         int dot = virtualIP.lastIndexOf('.');
         return virtualIP.substring(dot + 1);
